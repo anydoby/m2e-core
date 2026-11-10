@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 import org.slf4j.Logger;
@@ -106,9 +107,29 @@ public class MavenBuilderImpl {
     this(project -> null);
   }
 
+  /**
+   * The result of a build.
+   *
+   * @param dependencies the projects that the build depends on
+   * @param stopped <code>true</code> if the build stopped before all build participants ran
+   */
+  public record BuildResult(Set<IProject> dependencies, boolean stopped) {
+  }
+
   public Set<IProject> build(MavenSession session, IMavenProjectFacade projectFacade, int kind,
       Map<String, String> args, Map<MojoExecutionKey, List<AbstractBuildParticipant>> participants,
       IProgressMonitor monitor) throws CoreException {
+    return build(session, projectFacade, kind, args, participants, () -> false, monitor).dependencies();
+  }
+
+  /**
+   * Runs the build participants of the project. Before each build participant, the build checks
+   * <code>stopRequested</code>. If it returns <code>true</code>, the build does not run the remaining build
+   * participants and does not record the build as complete.
+   */
+  public BuildResult build(MavenSession session, IMavenProjectFacade projectFacade, int kind,
+      Map<String, String> args, Map<MojoExecutionKey, List<AbstractBuildParticipant>> participants,
+      BooleanSupplier stopRequested, IProgressMonitor monitor) throws CoreException {
 
     // 442524 safety guard
     URLConnectionCaches.assertDisabled();
@@ -124,7 +145,7 @@ public class MavenBuilderImpl {
     IResourceDelta delta = deltaProvider.getDelta(project);
     DeltaType deltaType = hasRelevantDelta(projectFacade, delta);
     if(deltaType == DeltaType.IRRELEVANT) {
-      return Set.of(project);
+      return new BuildResult(Set.of(project), false);
     }
     ProjectBuildState buildState = deltaState.computeIfAbsent(project, ProjectBuildState::new);
     final BuildResultCollector participantResults = new BuildResultCollector();
@@ -135,9 +156,17 @@ public class MavenBuilderImpl {
 
     Map<Throwable, MojoExecutionKey> buildErrors = new LinkedHashMap<>();
     MavenProjectMutableState snapshot = MavenProjectMutableState.takeSnapshot(mavenProject);
+    boolean stopped = false;
     try {
-      participants.forEach((mojoExecutionKey, buildParticipants) -> {
-        for(InternalBuildParticipant participant : buildParticipants) {
+      participantsLoop: for(Map.Entry<MojoExecutionKey, List<AbstractBuildParticipant>> entry : participants
+          .entrySet()) {
+        MojoExecutionKey mojoExecutionKey = entry.getKey();
+        for(InternalBuildParticipant participant : entry.getValue()) {
+          if(stopRequested.getAsBoolean()) {
+            log.debug("Build of project {} stopped before plugin execution {}", project.getName(), mojoExecutionKey);
+            stopped = true;
+            break participantsLoop;
+          }
           Set<File> debugRefreshFiles = !debugHooks.isEmpty() ? new LinkedHashSet<>(participantResults.getFiles())
               : null;
           log.debug("Executing build participant {} for plugin execution {}", participant.getClass().getName(),
@@ -181,7 +210,7 @@ public class MavenBuilderImpl {
           debugBuildParticipant(debugHooks, projectFacade, mojoExecutionKey, (AbstractBuildParticipant) participant,
               diff(debugRefreshFiles, participantResults.getFiles()), monitor);
         }
-      });
+      }
     } catch(Exception e) {
       log.debug("Unexpected build exception", e);
       buildErrors.put(e, null);
@@ -198,11 +227,12 @@ public class MavenBuilderImpl {
     // Process errors and warnings
     MavenExecutionResult result = session.getResult();
     processBuildResults(project, mavenProject, result, participantResults, buildErrors);
-    if(buildErrors.isEmpty()) {
+    if(buildErrors.isEmpty() && !stopped) {
       //we only commit this when there are no errors so just in case a failure is cased by a changed file it is again queried afterwards
+      //a stopped build did not run all participants, so the next build must see the same changes again
       buildState.commit();
     }
-    return dependencies;
+    return new BuildResult(dependencies, stopped);
   }
 
   private DeltaType hasRelevantDelta(IMavenProjectFacade projectFacade, IResourceDelta resourceDelta)

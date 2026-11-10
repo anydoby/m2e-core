@@ -161,8 +161,18 @@ public class MavenBuilder extends IncrementalProjectBuilder implements DeltaProv
         Map<MojoExecutionKey, List<AbstractBuildParticipant>> buildParticipantsByMojoExecutionKey, int kind,
         Map<String, String> args, IProgressMonitor monitor) throws CoreException {
 
-      Set<IProject> dependencies = builder.build(context.getSession(), projectFacade, kind, args,
-          buildParticipantsByMojoExecutionKey, monitor);
+      MavenBuilderImpl.BuildResult result = builder.build(context.getSession(), projectFacade, kind, args,
+          buildParticipantsByMojoExecutionKey,
+          // isInterrupted() reports the state of the auto-build job, also during other builds. Only an auto-build
+          // can stop for another operation, because the platform starts it again. Other builds stop only on cancel.
+          () -> (kind == AUTO_BUILD && isInterrupted()) || monitor.isCanceled(), monitor);
+      if(result.stopped()) {
+        // Another operation waits for the workspace, or the user canceled the build. Keep the last built state,
+        // so that the next build gets the changes of this build again. Do not throw OperationCanceledException:
+        // the platform then forgets the last built state, and the next build is a full build.
+        rememberLastBuiltState();
+      }
+      Set<IProject> dependencies = result.dependencies();
 
       if(dependencies.isEmpty()) {
         return null;
