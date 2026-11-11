@@ -137,6 +137,8 @@ public class MavenPreferencePage extends FieldEditorPreferencePage implements IW
           MavenPreferenceConstants.P_BUILDER_USE_NULL_SCHEDULING_RULE, Messages.preferencesNullSchedulingRule,
           getFieldEditorParent());
       addField(nullSchedulingRule);
+      addField(new BooleanFieldEditor(MavenPreferenceConstants.P_BUILDER_INTERRUPT_PARTICIPANTS,
+          Messages.preferencesInterruptBuildParticipants, getFieldEditorParent()));
     }
   }
 

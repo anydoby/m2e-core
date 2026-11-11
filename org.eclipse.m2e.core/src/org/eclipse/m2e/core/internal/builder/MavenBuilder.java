@@ -30,6 +30,7 @@ import org.eclipse.core.resources.IResourceDelta;
 import org.eclipse.core.resources.IncrementalProjectBuilder;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.OperationCanceledException;
 import org.eclipse.core.runtime.jobs.ISchedulingRule;
 
 import org.apache.maven.project.MavenProject;
@@ -40,6 +41,7 @@ import org.eclipse.m2e.core.internal.IMavenConstants;
 import org.eclipse.m2e.core.internal.M2EUtils;
 import org.eclipse.m2e.core.internal.MavenPluginActivator;
 import org.eclipse.m2e.core.internal.markers.IMavenMarkerManager;
+import org.eclipse.m2e.core.internal.preferences.MavenConfigurationImpl;
 import org.eclipse.m2e.core.internal.project.registry.ProjectRegistryManager;
 import org.eclipse.m2e.core.project.IMavenProjectFacade;
 import org.eclipse.m2e.core.project.IProjectConfiguration;
@@ -165,7 +167,10 @@ public class MavenBuilder extends IncrementalProjectBuilder implements DeltaProv
           buildParticipantsByMojoExecutionKey,
           // isInterrupted() reports the state of the auto-build job, also during other builds. Only an auto-build
           // can stop for another operation, because the platform starts it again. Other builds stop only on cancel.
-          () -> (kind == AUTO_BUILD && isInterrupted()) || monitor.isCanceled(), monitor);
+          () -> (kind == AUTO_BUILD && isInterrupted()) || monitor.isCanceled(),
+          MavenPlugin.getMavenConfiguration() instanceof MavenConfigurationImpl configuration
+              && configuration.buildInterruptsParticipants(),
+          monitor);
       if(result.stopped()) {
         // Another operation waits for the workspace, or the user canceled the build. Keep the last built state,
         // so that the next build gets the changes of this build again. Do not throw OperationCanceledException:
@@ -200,6 +205,15 @@ public class MavenBuilder extends IncrementalProjectBuilder implements DeltaProv
     long start = System.currentTimeMillis();
     try {
       return methodBuild.execute(kind, args, monitor);
+    } catch(OperationCanceledException e) {
+      if(monitor == null || !monitor.isCanceled()) {
+        throw e;
+      }
+      // The user canceled the build. If the exception leaves this builder, the platform forgets the last built state
+      // and the next build is a full build. Keep the state instead, so that the next build gets the same changes again.
+      log.debug("Build of project {} canceled", getProject().getName()); //$NON-NLS-1$
+      rememberLastBuiltState();
+      return null;
     } finally {
       log.debug("Built project {} in {} ms", getProject().getName(), System.currentTimeMillis() - start); //$NON-NLS-1$
     }

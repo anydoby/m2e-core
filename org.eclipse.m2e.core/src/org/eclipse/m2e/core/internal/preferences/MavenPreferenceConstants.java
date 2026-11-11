@@ -172,6 +172,14 @@ public interface MavenPreferenceConstants {
   String P_BUILDER_USE_NULL_SCHEDULING_RULE = "builderUsesNullSchedulingRule"; //$NON-NLS-1$
 
   /**
+   * boolean. If <code>true</code>, an auto-build interrupts a running build participant when another operation waits
+   * for the workspace.
+   *
+   * @experimental
+   */
+  String P_BUILDER_INTERRUPT_PARTICIPANTS = "builderInterruptsParticipants"; //$NON-NLS-1$
+
+  /**
    * Enable SNAPSHOT Archetypes
    *
    * @since 1.15
