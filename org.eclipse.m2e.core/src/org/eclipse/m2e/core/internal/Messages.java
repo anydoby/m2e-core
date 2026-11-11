@@ -70,6 +70,8 @@ public class Messages extends NLS {
 
   public static String LifecycleConfigurationPluginExecutionNotCovered;
 
+  public static String SlowIncrementalMojoExecution;
+
   public static String LifecycleConfigurationPluginExecutionErrorMessage;
 
   public static String LifecycleDuplicate;

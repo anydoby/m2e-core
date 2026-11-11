@@ -355,6 +355,10 @@ public class Messages extends NLS {
 
   public static String LifecycleMappingProposal_workspaceIgnore_label;
 
+  public static String LifecycleMappingProposal_skipOnIncremental_label;
+
+  public static String LifecycleMappingProposal_workspaceSkipOnIncremental_label;
+
   public static String LifecycleMappingProposal_sourceIgnore_label;
 
   static {

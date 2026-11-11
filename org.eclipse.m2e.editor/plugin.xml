@@ -66,5 +66,9 @@
 			class="org.eclipse.m2e.editor.internal.markers.MavenMarkerResolutionGenerator"
 			markerType="org.eclipse.m2e.core.maven2Problem.lifecycleMapping">
 		</markerResolutionGenerator>
+		<markerResolutionGenerator
+			class="org.eclipse.m2e.editor.internal.markers.MavenMarkerResolutionGenerator"
+			markerType="org.eclipse.m2e.core.maven2Problem.build">
+		</markerResolutionGenerator>
 	</extension>
 </plugin>

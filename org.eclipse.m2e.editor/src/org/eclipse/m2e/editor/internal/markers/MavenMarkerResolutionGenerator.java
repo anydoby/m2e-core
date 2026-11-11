@@ -25,6 +25,7 @@ import org.eclipse.m2e.core.internal.IMavenConstants;
 import org.eclipse.m2e.core.lifecyclemapping.model.PluginExecutionAction;
 import org.eclipse.m2e.editor.internal.lifecycle.ConflictingLifecycleMappingResolution;
 import org.eclipse.m2e.editor.internal.lifecycle.LifecycleMappingResolution;
+import org.eclipse.m2e.editor.internal.lifecycle.SkipOnIncrementalBuildResolution;
 import org.eclipse.m2e.editor.internal.lifecycle.WorkspaceLifecycleMappingResolution;
 
 
@@ -69,6 +70,14 @@ public class MavenMarkerResolutionGenerator implements IMarkerResolutionGenerato
     if(IMavenConstants.EDITOR_HINT_NOT_COVERED_MOJO_EXECUTION.equals(hint)) {
       return new IMarkerResolution[] {new LifecycleMappingResolution(marker, PluginExecutionAction.ignore),
           new WorkspaceLifecycleMappingResolution(marker, PluginExecutionAction.ignore),};
+    }
+    if(IMavenConstants.EDITOR_HINT_SLOW_INCREMENTAL_MOJO_EXECUTION.equals(hint)) {
+      if(marker.getAttribute(IMavenConstants.MARKER_ATTR_MAPPING_IN_POM, false)) {
+        // a workspace mapping has no effect if a pom.xml maps the mojo execution
+        return new IMarkerResolution[] {new SkipOnIncrementalBuildResolution(marker, false)};
+      }
+      return new IMarkerResolution[] {new SkipOnIncrementalBuildResolution(marker, false),
+          new SkipOnIncrementalBuildResolution(marker, true)};
     }
     if(IMavenConstants.EDITOR_HINT_MISSING_CONFIGURATOR.equals(hint)) {
       return new IMarkerResolution[] {new LifecycleMappingResolution(marker, PluginExecutionAction.ignore),

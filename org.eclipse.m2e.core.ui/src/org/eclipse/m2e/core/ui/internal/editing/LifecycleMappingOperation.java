@@ -42,6 +42,8 @@ import org.slf4j.LoggerFactory;
 import org.w3c.dom.Comment;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
 import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;
@@ -78,6 +80,11 @@ public class LifecycleMappingOperation implements Operation {
    */
   private boolean createAtTopLevel = false;
 
+  /**
+   * For the execute action: the value of runOnIncremental to write, or <code>null</code> to keep the mapping as it is.
+   */
+  private final Boolean runOnIncremental;
+
   public LifecycleMappingOperation(String pluginGroupId, String pluginArtifactId, String pluginVersion,
       PluginExecutionAction action, String[] goals) {
     this(pluginGroupId, pluginArtifactId, pluginVersion, action, goals, false);
@@ -85,6 +92,15 @@ public class LifecycleMappingOperation implements Operation {
 
   public LifecycleMappingOperation(String pluginGroupId, String pluginArtifactId, String pluginVersion,
       PluginExecutionAction action, String[] goals, boolean createAtTopLevel) {
+    this(pluginGroupId, pluginArtifactId, pluginVersion, action, goals, createAtTopLevel, null);
+  }
+
+  /**
+   * @param runOnIncremental for the execute action: the value of runOnIncremental, or <code>null</code> to not write it
+   */
+  public LifecycleMappingOperation(String pluginGroupId, String pluginArtifactId, String pluginVersion,
+      PluginExecutionAction action, String[] goals, boolean createAtTopLevel, Boolean runOnIncremental) {
+    this.runOnIncremental = runOnIncremental;
     this.artifactId = pluginArtifactId;
     this.groupId = pluginGroupId;
     this.version = pluginVersion;
@@ -170,6 +186,18 @@ public class LifecycleMappingOperation implements Operation {
         format(createElementWithText(goalsEl, GOAL, goal));
       }
     }
+    if(PluginExecutionAction.execute.equals(action) && runOnIncremental != null) {
+      Element executeEl = getChild(execution, "action", action.toString()); //$NON-NLS-1$
+      // the hint comment of a new execute mapping explains runOnIncremental; the value is now set
+      NodeList children = executeEl.getChildNodes();
+      for(int i = children.getLength() - 1; i >= 0; i-- ) {
+        Node child = children.item(i);
+        if(child instanceof Comment comment && comment.getData().contains("runOnIncremental")) { //$NON-NLS-1$
+          executeEl.removeChild(comment);
+        }
+      }
+      setText(getChild(executeEl, "runOnIncremental"), runOnIncremental.toString()); //$NON-NLS-1$
+    }
 
   }
 
@@ -186,7 +214,7 @@ public class LifecycleMappingOperation implements Operation {
     exec.appendChild(actionEl);
     Element actionEl2 = document.createElement(action.toString());
     actionEl.appendChild(actionEl2);
-    if(PluginExecutionAction.execute.equals(action)) {
+    if(PluginExecutionAction.execute.equals(action) && runOnIncremental == null) {
       //mkleint: a bit scared to have this text localized, with chinese/japanese locales, it could write garbage into the pom file..
       actionEl2
           .appendChild(document

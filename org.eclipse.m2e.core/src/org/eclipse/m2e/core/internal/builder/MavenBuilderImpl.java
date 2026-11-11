@@ -47,6 +47,7 @@ import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IAdaptable;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.QualifiedName;
 
 import org.apache.maven.execution.MavenExecutionResult;
@@ -64,12 +65,14 @@ import org.eclipse.m2e.core.internal.builder.plexusbuildapi.AbstractEclipseBuild
 import org.eclipse.m2e.core.internal.builder.plexusbuildapi.EclipseResourceBuildDelta;
 import org.eclipse.m2e.core.internal.builder.plexusbuildapi.PlexusBuildAPI;
 import org.eclipse.m2e.core.internal.embedder.MavenProjectMutableState;
+import org.eclipse.m2e.core.internal.lifecyclemapping.LifecycleMappingFactory;
 import org.eclipse.m2e.core.internal.markers.IMavenMarkerManager;
 import org.eclipse.m2e.core.internal.markers.SourceLocation;
 import org.eclipse.m2e.core.internal.markers.SourceLocationHelper;
 import org.eclipse.m2e.core.project.IMavenProjectFacade;
 import org.eclipse.m2e.core.project.MavenProjectUtils;
 import org.eclipse.m2e.core.project.configurator.AbstractBuildParticipant;
+import org.eclipse.m2e.core.project.configurator.MojoExecutionBuildParticipant;
 import org.eclipse.m2e.core.project.configurator.MojoExecutionKey;
 
 
@@ -154,6 +157,7 @@ public class MavenBuilderImpl {
     IResourceDelta delta = deltaProvider.getDelta(project);
     DeltaType deltaType = hasRelevantDelta(projectFacade, delta);
     if(deltaType == DeltaType.IRRELEVANT) {
+      addSlowMojoMarkers(project, mavenProject, participants);
       return new BuildResult(Set.of(project), false);
     }
     ProjectBuildState buildState = deltaState.computeIfAbsent(project, ProjectBuildState::new);
@@ -196,12 +200,14 @@ public class MavenBuilderImpl {
           ParticipantInterrupter interrupter = interruptParticipants ? ParticipantInterrupter.start(stopRequested)
               : null;
           boolean interruptedByStop;
+          boolean completed = false;
           try {
             if(isApplicable(participant, kind, delta)) {
               Set<IProject> sub = participant.build(kind, monitor);
               if(sub != null) {
                 dependencies.addAll(sub);
               }
+              completed = true;
             }
           } catch(Exception e) {
             log.debug("Exception in build participant {}", participant.getClass().getName(), e);
@@ -228,6 +234,10 @@ public class MavenBuilderImpl {
             stopped = true;
             break participantsLoop;
           }
+          if(completed) {
+            recordIncrementalTime(project, kind, participant, mojoExecutionKey,
+                System.currentTimeMillis() - executionStartTime);
+          }
 
           debugBuildParticipant(debugHooks, projectFacade, mojoExecutionKey, (AbstractBuildParticipant) participant,
               diff(debugRefreshFiles, participantResults.getFiles()), monitor);
@@ -249,12 +259,81 @@ public class MavenBuilderImpl {
     // Process errors and warnings
     MavenExecutionResult result = session.getResult();
     processBuildResults(project, mavenProject, result, participantResults, buildErrors);
+    addSlowMojoMarkers(project, mavenProject, participants);
     if(buildErrors.isEmpty() && !stopped) {
       //we only commit this when there are no errors so just in case a failure is cased by a changed file it is again queried afterwards
       //a stopped build did not run all participants, so the next build must see the same changes again
       buildState.commit();
     }
     return new BuildResult(dependencies, stopped);
+  }
+
+  private static void recordIncrementalTime(IProject project, int kind, InternalBuildParticipant participant,
+      MojoExecutionKey mojoExecutionKey, long millis) {
+    if((kind == IncrementalProjectBuilder.AUTO_BUILD || kind == IncrementalProjectBuilder.INCREMENTAL_BUILD)
+        && participant instanceof MojoExecutionBuildParticipant mojoParticipant
+        && mojoParticipant.appliesToBuildKind(kind)) {
+      IncrementalMojoTimes.INSTANCE.record(project, mojoExecutionKey, millis);
+    }
+  }
+
+  /**
+   * Adds a warning to pom.xml for each mojo execution that runs on incremental builds and is slow. The builder deletes
+   * the build markers at the start of each build, so this method runs after each build.
+   */
+  private static void addSlowMojoMarkers(IProject project, MavenProject mavenProject,
+      Map<MojoExecutionKey, List<AbstractBuildParticipant>> participants) {
+    IMavenMarkerManager markerManager = MavenPluginActivator.getDefault().getMavenMarkerManager();
+    participants.forEach((mojoExecutionKey, buildParticipants) -> {
+      for(AbstractBuildParticipant participant : buildParticipants) {
+        if(!(participant instanceof MojoExecutionBuildParticipant mojoParticipant)) {
+          continue;
+        }
+        if(!mojoParticipant.appliesToBuildKind(IncrementalProjectBuilder.INCREMENTAL_BUILD)) {
+          // the mapping changed: the times are not valid any more
+          IncrementalMojoTimes.INSTANCE.forget(project, mojoExecutionKey);
+          continue;
+        }
+        IncrementalMojoTimes.SlowMojo slow = IncrementalMojoTimes.INSTANCE.getSlowMojo(project, mojoExecutionKey);
+        if(slow != null) {
+          SourceLocation location = SourceLocationHelper.findLocation(mavenProject, mojoExecutionKey);
+          markerManager.addErrorMarker(project.getFile(IMavenConstants.POM_FILE_NAME), IMavenConstants.MARKER_BUILD_ID,
+              new SlowIncrementalMojoExecution(mojoExecutionKey, slow.averageMillis(), slow.runs(),
+                  isMappedInPom(project, mavenProject, mojoExecutionKey), location));
+        }
+      }
+    });
+  }
+
+  /**
+   * Results of {@link #isMappedInPom}, for the MavenProject instance of each project. A changed pom.xml gives a new
+   * MavenProject instance, so the results are computed again.
+   */
+  private record PomMappingCache(MavenProject mavenProject, Map<MojoExecutionKey, Boolean> mappedInPom) {
+  }
+
+  private static final Map<IProject, PomMappingCache> POM_MAPPING_CACHE = new ConcurrentHashMap<>();
+
+  /**
+   * @return <code>true</code> if this pom.xml or a parent maps the mojo execution. A workspace mapping then has no
+   *         effect, because pom mappings come first.
+   */
+  private static boolean isMappedInPom(IProject project, MavenProject mavenProject,
+      MojoExecutionKey mojoExecutionKey) {
+    PomMappingCache cache = POM_MAPPING_CACHE.compute(project,
+        (p, old) -> old != null && old.mavenProject() == mavenProject ? old
+            : new PomMappingCache(mavenProject, new ConcurrentHashMap<>()));
+    return cache.mappedInPom().computeIfAbsent(mojoExecutionKey, key -> readMappedInPom(mavenProject, key));
+  }
+
+  private static boolean readMappedInPom(MavenProject mavenProject, MojoExecutionKey mojoExecutionKey) {
+    try {
+      return LifecycleMappingFactory.getPomMappingMetadataSources(mavenProject, new NullProgressMonitor()).stream()
+          .anyMatch(source -> !source.getPluginExecutionMetadata(mojoExecutionKey).isEmpty());
+    } catch(CoreException | RuntimeException e) {
+      log.debug("Cannot read the lifecycle mapping of {}", mojoExecutionKey, e); //$NON-NLS-1$
+      return false;
+    }
   }
 
   private DeltaType hasRelevantDelta(IMavenProjectFacade projectFacade, IResourceDelta resourceDelta)

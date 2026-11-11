@@ -89,6 +89,9 @@ public interface IMavenConstants {
 
   String MARKER_ATTR_LIFECYCLE_PHASE = "lifecyclePhase";//$NON-NLS-1$
 
+  /** boolean: a pom.xml maps the mojo execution, so a workspace lifecycle mapping has no effect */
+  String MARKER_ATTR_MAPPING_IN_POM = "mappingInPom";//$NON-NLS-1$
+
   String MARKER_ATTR_VERSION = "version";//$NON-NLS-1$
 
   /**
@@ -107,6 +110,8 @@ public interface IMavenConstants {
   String EDITOR_HINT_MISSING_SCHEMA = "missing_schema";//$NON-NLS-1$
 
   String EDITOR_HINT_NOT_COVERED_MOJO_EXECUTION = "not_covered_mojo_execution";//$NON-NLS-1$
+
+  String EDITOR_HINT_SLOW_INCREMENTAL_MOJO_EXECUTION = "slow_incremental_mojo_execution";//$NON-NLS-1$
 
   String EDITOR_HINT_IMPLICIT_LIFECYCLEMAPPING = "implicit_lifecyclemaping";//$NON-NLS-1$
 

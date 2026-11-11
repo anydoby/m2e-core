@@ -325,6 +325,26 @@ public class LifecycleMappingFactory {
     }
   }
 
+  /**
+   * Maps the goals of the plugin to the execute action, with the given value of runOnIncremental. An existing execute
+   * mapping for the plugin in this source gets the new value for all its goals.
+   */
+  public static void addLifecyclePluginExecution(LifecycleMappingMetadataSource mapping, String groupId,
+      String artifactId, String version, List<String> goals, boolean runOnIncremental) {
+    addLifecyclePluginExecution(mapping, groupId, artifactId, version, goals, PluginExecutionAction.execute);
+    PluginExecutionMetadata execution = getPluginExecutionMetadata(mapping, groupId, artifactId, version,
+        PluginExecutionAction.execute);
+    Xpp3Dom execute = ((Xpp3Dom) execution.getActionDom()).getChild(PluginExecutionAction.execute.toString());
+    for(int i = execute.getChildCount() - 1; i >= 0; i-- ) {
+      if(ELEMENT_RUN_ON_INCREMENTAL.equals(execute.getChild(i).getName())) {
+        execute.removeChild(i);
+      }
+    }
+    Xpp3Dom value = new Xpp3Dom(ELEMENT_RUN_ON_INCREMENTAL);
+    value.setValue(Boolean.toString(runOnIncremental));
+    execute.addChild(value);
+  }
+
   public static void addLifecycleMappingPackagingFilter(LifecycleMappingMetadataSource mapping, String bsn,
       String version, String packaging) {
     LifecycleMappingFilter filter = getLifecycleMappingFilter(bsn, version, mapping);
