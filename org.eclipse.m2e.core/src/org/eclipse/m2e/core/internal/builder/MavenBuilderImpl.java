@@ -28,6 +28,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
@@ -183,6 +187,9 @@ public class MavenBuilderImpl {
             participant2.setArgs(args);
           }
           long executionStartTime = System.currentTimeMillis();
+          Set<Throwable> errorsBefore = new HashSet<>(buildErrors.keySet());
+          StopWatch stopWatch = new StopWatch(stopRequested);
+          boolean interruptedByStop;
           try {
             if(isApplicable(participant, kind, delta)) {
               Set<IProject> sub = participant.build(kind, monitor);
@@ -194,6 +201,7 @@ public class MavenBuilderImpl {
             log.debug("Exception in build participant {}", participant.getClass().getName(), e);
             buildErrors.put(e, mojoExecutionKey);
           } finally {
+            interruptedByStop = stopWatch.finish();
             log.debug("Finished executing build participant {} for plugin execution {} in {} ms",
                 participant.getClass().getName(), mojoExecutionKey, System.currentTimeMillis() - executionStartTime);
             participant.setMavenProjectFacade(null);
@@ -205,6 +213,14 @@ public class MavenBuilderImpl {
             }
 
             processMavenSessionErrors(session, mojoExecutionKey, buildErrors);
+          }
+          if(interruptedByStop) {
+            // The participant failed because the build was interrupted. That is a stop, not a build error.
+            buildErrors.keySet().removeIf(error -> !errorsBefore.contains(error));
+            log.debug("Build of project {} interrupted during plugin execution {}", project.getName(),
+                mojoExecutionKey);
+            stopped = true;
+            break participantsLoop;
           }
 
           debugBuildParticipant(debugHooks, projectFacade, mojoExecutionKey, (AbstractBuildParticipant) participant,
@@ -281,6 +297,68 @@ public class MavenBuilderImpl {
       return true;
     });
     return deltaType.get();
+  }
+
+  /**
+   * Interrupts the build thread while a build participant runs, if the build must stop. The interrupt comes after a
+   * grace period, so that a short participant still finishes. A participant stops only if it reacts to the interrupt,
+   * for example by ending a blocking call.
+   */
+  private static final class StopWatch {
+
+    private static final long GRACE_MILLIS = 2000;
+
+    private static final ScheduledExecutorService WATCHER = Executors.newSingleThreadScheduledExecutor(runnable -> {
+      Thread thread = new Thread(runnable, "m2e build stop watcher"); //$NON-NLS-1$
+      thread.setDaemon(true);
+      return thread;
+    });
+
+    private final Thread buildThread = Thread.currentThread();
+    private final Object lock = new Object();
+    private final ScheduledFuture<?> task;
+    // all fields below are guarded by lock
+    private long stopRequestedSince = -1;
+    private boolean interruptSent;
+
+    StopWatch(BooleanSupplier stopRequested) {
+      task = WATCHER.scheduleWithFixedDelay(() -> check(stopRequested), 100, 100, TimeUnit.MILLISECONDS);
+    }
+
+    private void check(BooleanSupplier stopRequested) {
+      synchronized(lock) {
+        if(interruptSent) {
+          return;
+        }
+        if(!stopRequested.getAsBoolean()) {
+          stopRequestedSince = -1;
+          return;
+        }
+        long now = System.currentTimeMillis();
+        if(stopRequestedSince < 0) {
+          stopRequestedSince = now;
+        }
+        if(now - stopRequestedSince >= GRACE_MILLIS) {
+          interruptSent = true;
+          buildThread.interrupt();
+        }
+      }
+    }
+
+    /**
+     * Stops watching. Clears a pending interrupt, so that the rest of the build does not see it.
+     *
+     * @return <code>true</code> if the build thread was interrupted
+     */
+    boolean finish() {
+      synchronized(lock) {
+        task.cancel(false);
+        if(interruptSent) {
+          Thread.interrupted();
+        }
+        return interruptSent;
+      }
+    }
   }
 
   private static Predicate<IPath> toPrefixPredicate(IPath location) {
