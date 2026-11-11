@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<fragment>
+   <extension point="org.eclipse.m2e.core.projectConfigurators">
+      <configurator
+            class="org.eclipse.m2e.core.internal.builder.StopTestProjectConfigurator"
+            id="org.eclipse.m2e.core.tests.stopTestConfigurator">
+      </configurator>
+   </extension>
+</fragment>
