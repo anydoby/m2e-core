@@ -395,6 +395,14 @@ public class MavenConfigurationImpl implements IMavenConfiguration, IPreferenceC
     return getBooleanPreference(MavenPreferenceConstants.P_BUILDER_USE_NULL_SCHEDULING_RULE);
   }
 
+  /**
+   * @experimental An interrupt can stop a build participant while it writes a file.
+   * @return whether a build interrupts a running build participant when the build must stop
+   */
+  public boolean buildInterruptsParticipants() {
+    return getBooleanPreference(MavenPreferenceConstants.P_BUILDER_INTERRUPT_PARTICIPANTS);
+  }
+
   private boolean getBooleanPreference(String key) {
     return Boolean.parseBoolean(getStringPreference(key, null));
   }

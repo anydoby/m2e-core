@@ -751,6 +751,8 @@ public class Messages extends NLS {
 
   public static String preferencesNullSchedulingRule;
 
+  public static String preferencesInterruptBuildParticipants;
+
   public static String artifactComponentArtifact;
 
   public static String artifactComponentGroupId;
