@@ -23,7 +23,8 @@ import java.util.function.BooleanSupplier;
  * interrupt does not lose work. A participant stops only if it reacts to the interrupt, for example in a blocking
  * call.
  * <p>
- * Experimental: an interrupt can stop a participant while it writes a file.
+ * Experimental: an interrupt can stop a participant while it writes a file. The builder then deletes the files that
+ * the participant changed in the build directory, see {@link InterruptedOutputCleaner}.
  */
 final class ParticipantInterrupter {
 

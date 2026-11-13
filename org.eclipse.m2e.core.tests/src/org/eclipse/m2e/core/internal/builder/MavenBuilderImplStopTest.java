@@ -14,6 +14,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -85,7 +90,9 @@ public class MavenBuilderImplStopTest extends AbstractMavenProjectTestCase {
   public void testDoesNotInterruptRunningParticipantByDefault() throws Exception {
     AtomicBoolean stop = new AtomicBoolean();
     AtomicBoolean interrupted = new AtomicBoolean();
+    Path output = targetDirectory().resolve("complete.txt");
     BuildResult result = build(stop::get, false, participant("first", () -> {
+      write(output);
       stop.set(true);
       try {
         Thread.sleep(ParticipantInterrupter.GRACE_MILLIS + 1_000);
@@ -98,13 +105,19 @@ public class MavenBuilderImplStopTest extends AbstractMavenProjectTestCase {
     assertFalse("the participant must not get an interrupt", interrupted.get());
     assertTrue(result.stopped());
     assertEquals(List.of("first"), calls);
+    assertTrue("a participant that was not interrupted keeps its output", Files.exists(output));
   }
 
   @Test
   public void testInterruptsRunningParticipantWhenEnabled() throws Exception {
     AtomicBoolean stop = new AtomicBoolean();
+    Path older = targetDirectory().resolve("older.txt");
+    write(older);
+    Files.setLastModifiedTime(older, FileTime.fromMillis(System.currentTimeMillis() - 10_000));
+    Path halfWritten = targetDirectory().resolve("generated/half-written.txt");
     long start = System.currentTimeMillis();
     BuildResult result = build(stop::get, true, participant("first", () -> {
+      write(halfWritten);
       stop.set(true);
       try {
         Thread.sleep(60_000);
@@ -123,6 +136,9 @@ public class MavenBuilderImplStopTest extends AbstractMavenProjectTestCase {
     // an interrupted participant is a stop, not a build error
     IMarker[] markers = project.findMarkers(IMavenConstants.MARKER_BUILD_ID, true, IResource.DEPTH_INFINITE);
     assertEquals(0, markers.length);
+    // the output of the interrupted participant is deleted, older output stays
+    assertFalse(Files.exists(halfWritten));
+    assertTrue(Files.exists(older));
   }
 
   @Test
@@ -136,6 +152,19 @@ public class MavenBuilderImplStopTest extends AbstractMavenProjectTestCase {
     assertEquals(List.of("first", "second"), calls);
     IMarker[] markers = project.findMarkers(IMavenConstants.MARKER_BUILD_ID, true, IResource.DEPTH_INFINITE);
     assertEquals(1, markers.length);
+  }
+
+  private Path targetDirectory() {
+    return Path.of(facade.getMavenProject().getBuild().getDirectory());
+  }
+
+  private static void write(Path file) {
+    try {
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, "content");
+    } catch(IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   private BuildResult build(BooleanSupplier stopRequested, boolean interruptParticipants,

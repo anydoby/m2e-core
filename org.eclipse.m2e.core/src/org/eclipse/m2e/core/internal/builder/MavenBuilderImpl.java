@@ -16,6 +16,7 @@ package org.eclipse.m2e.core.internal.builder;
 import static org.eclipse.core.resources.IncrementalProjectBuilder.FULL_BUILD;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -231,6 +232,7 @@ public class MavenBuilderImpl {
             buildErrors.keySet().removeIf(error -> !errorsBefore.contains(error));
             log.debug("Build of project {} interrupted during plugin execution {}", project.getName(),
                 mojoExecutionKey);
+            deleteInterruptedOutput(mavenProject, mojoExecutionKey, executionStartTime);
             stopped = true;
             break participantsLoop;
           }
@@ -266,6 +268,19 @@ public class MavenBuilderImpl {
       buildState.commit();
     }
     return new BuildResult(dependencies, stopped);
+  }
+
+  private static void deleteInterruptedOutput(MavenProject mavenProject, MojoExecutionKey mojoExecutionKey,
+      long startMillis) {
+    String directory = mavenProject.getBuild() == null ? null : mavenProject.getBuild().getDirectory();
+    if(directory == null) {
+      return;
+    }
+    int deleted = InterruptedOutputCleaner.deleteFilesChangedSince(Path.of(directory), startMillis);
+    if(deleted > 0) {
+      log.info("Deleted {} files that plugin execution {} changed before it was interrupted", deleted,
+          mojoExecutionKey);
+    }
   }
 
   private static void recordIncrementalTime(IProject project, int kind, InternalBuildParticipant participant,
