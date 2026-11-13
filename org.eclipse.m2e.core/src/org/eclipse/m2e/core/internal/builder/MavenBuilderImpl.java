@@ -296,13 +296,43 @@ public class MavenBuilderImpl {
             return true;
           }
         }
-        //anything else has changed, so mark this as relevant an leave the loop
-        deltaType.set(DeltaType.INCREMENTAL);
-        return false;
+        if(isBuildInput(projectFacade, projectPath, fullPath)) {
+          //a build input has changed, so mark this as relevant and leave the loop
+          deltaType.set(DeltaType.INCREMENTAL);
+          return false;
+        }
+        //a file that is no build input, like a README, does not affect the build
+        return true;
       }
       return true;
     });
     return deltaType.get();
+  }
+
+  /**
+   * Returns whether a changed file can affect the Maven build: the project pom, a Maven config file, or a file in a
+   * source or resource folder of the project.
+   */
+  private static boolean isBuildInput(IMavenProjectFacade projectFacade, IPath projectPath, IPath fullPath) {
+    if(!projectPath.isPrefixOf(fullPath)) {
+      return true;
+    }
+    IPath relativePath = fullPath.removeFirstSegments(projectPath.segmentCount());
+    if((relativePath.segmentCount() == 1 && "pom.xml".equals(relativePath.lastSegment()))
+        || ".mvn".equals(relativePath.segment(0))) {
+      return true;
+    }
+    List<IPath> inputLocations = new ArrayList<>();
+    inputLocations.addAll(projectFacade.getCompileSourceLocations());
+    inputLocations.addAll(projectFacade.getTestCompileSourceLocations());
+    inputLocations.addAll(projectFacade.getResourceLocations());
+    inputLocations.addAll(projectFacade.getTestResourceLocations());
+    for(IPath location : inputLocations) {
+      if(location.isPrefixOf(relativePath)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static Predicate<IPath> toPrefixPredicate(IPath location) {
