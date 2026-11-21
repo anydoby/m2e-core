@@ -91,6 +91,17 @@ public class MavenBuilderRuleTest extends AbstractMavenProjectTestCase {
   }
 
   @Test
+  public void testFullBuildAfterCleanBuildsWithProjectRule() throws Exception {
+    project.build(IncrementalProjectBuilder.CLEAN_BUILD, new NullProgressMonitor());
+    project.build(IncrementalProjectBuilder.FULL_BUILD, new NullProgressMonitor());
+
+    ISchedulingRule rule = ruleInBuild.get();
+    assertNotNull("the build must hold a rule", rule);
+    assertFalse("a full build after a clean must not hold the workspace root: " + rule,
+        rule.contains(ResourcesPlugin.getWorkspace().getRoot()));
+  }
+
+  @Test
   public void testPomChangeBuildsWithWorkspaceRule() throws Exception {
     IFile pom = project.getFile("pom.xml");
     String content = new String(pom.getContents().readAllBytes());
