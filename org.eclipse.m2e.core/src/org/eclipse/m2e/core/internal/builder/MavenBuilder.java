@@ -29,6 +29,7 @@ import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResourceDelta;
 import org.eclipse.core.resources.IncrementalProjectBuilder;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.OperationCanceledException;
 import org.eclipse.core.runtime.jobs.ISchedulingRule;
@@ -258,6 +259,24 @@ public class MavenBuilder extends IncrementalProjectBuilder implements DeltaProv
     if(MavenPlugin.getMavenConfiguration().buildWithNullSchedulingRule()) {
       return null;
     }
+    if(canUseProjectRule()) {
+      return getProject();
+    }
     return super.getRule(kind, args);
+  }
+
+  /**
+   * Returns whether the build can run with the rule of its project. The build needs the workspace root only when it
+   * refreshes the project registry (see {@code getProjectFacade}): when the facade is missing or stale, or when the pom
+   * changed. With the project rule, a Maven build does not block changes in other projects.
+   */
+  private boolean canUseProjectRule() {
+    IProject project = getProject();
+    IMavenProjectFacade facade = projectManager.getProject(project);
+    if(facade == null || facade.isStale()) {
+      return false;
+    }
+    IResourceDelta delta = getDelta(project);
+    return delta == null || delta.findMember(IPath.fromOSString(IMavenConstants.POM_FILE_NAME)) == null;
   }
 }
